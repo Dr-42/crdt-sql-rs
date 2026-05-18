@@ -108,50 +108,75 @@ async fn main() {
 // --- The Autonomous Mesh Worker ---
 
 async fn run_mesh_gossip_protocol(pool: SqlitePool) {
-    // Short timeout so offline peers don't hang the loop
     let client = reqwest::Client::builder()
         .timeout(Duration::from_secs(2))
         .build()
         .unwrap();
 
     loop {
-        // Sleep for 3 seconds between gossip cycles
         tokio::time::sleep(Duration::from_secs(3)).await;
 
-        // Fetch all known peers
         let peers: Vec<String> = match sqlx::query("SELECT url FROM peers").fetch_all(&pool).await {
             Ok(rows) => rows.into_iter().map(|r| r.get("url")).collect(),
             Err(_) => continue,
         };
 
         for peer_url in peers {
-            let target = format!("{}/api/replication", peer_url);
+            // 1. Auto-inject http:// if forgotten
+            let url = if !peer_url.starts_with("http") {
+                format!("http://{}", peer_url)
+            } else {
+                peer_url.clone()
+            };
 
-            // Try to pull data. If it fails (laptop closed), just move on.
-            if let Ok(res) = client.get(&target).send().await {
-                if let Ok(remote_todos) = res.json::<Vec<Todo>>().await {
-                    let merge_query = "
-                        INSERT INTO todos (id, title, completed, deleted, updated_at)
-                        VALUES (?, ?, ?, ?, ?)
-                        ON CONFLICT(id) DO UPDATE SET
-                            title = excluded.title,
-                            completed = excluded.completed,
-                            deleted = excluded.deleted,
-                            updated_at = excluded.updated_at
-                        WHERE excluded.updated_at > todos.updated_at;
-                    ";
+            let target = format!("{}/api/replication", url);
 
-                    // Merge remote data directly into SQLite engine
-                    for t in remote_todos {
-                        let _ = sqlx::query(merge_query)
-                            .bind(t.id)
-                            .bind(t.title)
-                            .bind(t.completed)
-                            .bind(t.deleted)
-                            .bind(t.updated_at)
-                            .execute(&pool)
-                            .await;
+            // 2. Add verbose terminal logging
+            match client.get(&target).send().await {
+                Ok(res) => {
+                    if let Ok(remote_todos) = res.json::<Vec<Todo>>().await {
+                        let merge_query = "
+                            INSERT INTO todos (id, title, completed, deleted, updated_at)
+                            VALUES (?, ?, ?, ?, ?)
+                            ON CONFLICT(id) DO UPDATE SET
+                                title = excluded.title,
+                                completed = excluded.completed,
+                                deleted = excluded.deleted,
+                                updated_at = excluded.updated_at
+                            WHERE excluded.updated_at > todos.updated_at;
+                        ";
+
+                        let mut merged_count = 0;
+                        for t in remote_todos {
+                            let result = sqlx::query(merge_query)
+                                .bind(t.id)
+                                .bind(t.title)
+                                .bind(t.completed)
+                                .bind(t.deleted)
+                                .bind(t.updated_at)
+                                .execute(&pool)
+                                .await;
+
+                            // Count how many rows were actually updated/inserted
+                            if let Ok(q) = result {
+                                if q.rows_affected() > 0 {
+                                    merged_count += 1;
+                                }
+                            }
+                        }
+
+                        if merged_count > 0 {
+                            println!(
+                                "✅ Successfully merged {} changes from {}",
+                                merged_count, url
+                            );
+                        }
+                    } else {
+                        println!("⚠️ Reached {}, but couldn't parse the CRDT JSON.", url);
                     }
+                }
+                Err(e) => {
+                    println!("❌ Network block trying to reach {}: {}", url, e);
                 }
             }
         }

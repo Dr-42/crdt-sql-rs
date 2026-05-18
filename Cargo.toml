@@ -1,0 +1,13 @@
+[package]
+name = "axum_vanilla_app"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+axum = "0.8.9"
+tokio = { version = "1.37.0", features = ["full"] }
+sqlx = { version = "0.8.6", features = ["runtime-tokio", "sqlite"] }
+serde = { version = "1.0.228", features = ["derive"] }
+tower-http = { version = "0.6.10", features = ["fs"] }
+uuid = { version = "1.23.1", features = ["serde", "v4"] }
+reqwest = { version = "0.13.3", features = ["json"] }

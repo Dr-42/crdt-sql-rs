@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Autonomous Mesh Todo</title>
+    <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+    <main class="container">
+        <h1>Master Tasks</h1>
+        <form id="todo-form">
+            <input type="text" id="todo-input" placeholder="What needs to be done?" required autocomplete="off">
+            <button type="submit">Add</button>
+        </form>
+        <ul id="todo-list"></ul>
+        
+        <div class="network-panel">
+            <h3>Mesh Nodes</h3>
+            <p class="subtitle">Worker auto-syncs every 3 seconds.</p>
+            <form id="peer-form" class="sync-controls">
+                <input type="text" id="peer-url" placeholder="http://192.168.x.x:8080" required autocomplete="off">
+                <button type="submit" id="add-peer-btn">Register</button>
+            </form>
+            <ul id="peer-list" class="peer-list"></ul>
+        </div>
+    </main>
+    <script src="/app.js"></script>
+</body>
+</html>

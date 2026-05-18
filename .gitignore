@@ -2,3 +2,4 @@
 /.direnv
 .envrc
 todos.db
+node.key

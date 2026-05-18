@@ -1,6 +1,5 @@
 #!/usr/bin/env bash
 
-# Define your target node here
 TARGET="spandan@192.168.1.15:/home/spandan/Projects/probe/crdt-sql-rs"
 
 echo "=========================================================="
@@ -9,7 +8,6 @@ echo "📡 Target: $TARGET"
 echo "👀 Watching: ./src, ./assets, Cargo.toml"
 echo "=========================================================="
 
-# Run watchexec
 watchexec \
   --clear \
   --restart \
@@ -22,8 +20,11 @@ watchexec \
   rsync -avz --delete \
   --exclude 'target/' \
   --exclude '.git/' \
-  --exclude 'todos.db' \
-  --exclude 'todos.db-shm' \
-  --exclude 'todos.db-wal' \
+  --exclude "'todos_*.db'" \
+  --exclude "'todos_*.db-shm'" \
+  --exclude "'todos_*.db-wal'" \
+  --exclude 'users.db' \
+  --exclude 'users.db-shm' \
+  --exclude 'users.db-wal' \
   --exclude 'node.key' \
   ./ "$TARGET"

@@ -8,22 +8,43 @@
 </head>
 <body>
     <main class="container">
-        <h1>Master Tasks</h1>
-        <form id="todo-form">
-            <input type="text" id="todo-input" placeholder="What needs to be done?" required autocomplete="off">
-            <button type="submit">Add</button>
-        </form>
-        <ul id="todo-list"></ul>
-        
-        <div class="network-panel">
-            <h3>Mesh Nodes</h3>
-            <p class="subtitle">Worker auto-syncs every 3 seconds.</p>
-            <form id="peer-form" class="sync-controls">
-                <input type="text" id="peer-url" placeholder="http://192.168.x.x:8080" required autocomplete="off">
-                <button type="submit" id="add-peer-btn">Register</button>
-            </form>
-            <ul id="peer-list" class="peer-list"></ul>
+
+        <!-- ── Auth bar ── -->
+        <div id="auth-bar" class="auth-bar hidden">
+            <span id="user-info" class="user-info"></span>
+            <a href="/auth/login" id="login-btn" class="login-btn hidden">Sign in with Google</a>
         </div>
+
+        <h1>Master Tasks</h1>
+
+        <!-- ── Login wall ── -->
+        <div id="login-wall" class="login-wall hidden">
+            <p>Sign in to sync your todos across devices.</p>
+            <a href="/auth/login" class="login-btn-large">Sign in with Google →</a>
+        </div>
+
+        <!-- ── Todo UI (shown when logged in) ── -->
+        <div id="app" class="hidden">
+            <form id="todo-form">
+                <input type="text" id="todo-input" placeholder="What needs to be done?" required autocomplete="off">
+                <button type="submit">Add</button>
+            </form>
+            <ul id="todo-list"></ul>
+
+            <div class="network-panel">
+                <h3>Mesh Nodes</h3>
+                <p class="subtitle">
+                    UDP discovery every 5s · TCP replication every 3s · Port 11204
+                </p>
+                <!-- discovered peers auto-populate; manual fallback still works -->
+                <form id="peer-form" class="sync-controls">
+                    <input type="text" id="peer-url" placeholder="http://192.168.x.x:8080 (manual fallback)" autocomplete="off">
+                    <button type="submit" id="add-peer-btn">Register</button>
+                </form>
+                <ul id="peer-list" class="peer-list"></ul>
+            </div>
+        </div>
+
     </main>
     <script src="/app.js"></script>
 </body>

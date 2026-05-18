@@ -1,5 +1,7 @@
 /target
 /.direnv
 .envrc
-todos.db
+.env
+*.db
 node.key
+secret.md

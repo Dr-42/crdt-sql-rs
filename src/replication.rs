@@ -116,13 +116,14 @@ pub async fn run_replication_server(
     }
 }
 
+/// Returns `true` if the connection and sync succeeded, `false` on any failure.
 pub async fn pull_from_peer(
     peer_addr: &str,
     peer_port: u16,
     user_hash: &str,
     signing_key: &SigningKey,
     local_pool: &SqlitePool,
-) {
+) -> bool {
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     use tokio::net::TcpStream;
 
@@ -131,7 +132,7 @@ pub async fn pull_from_peer(
         Ok(s) => s,
         Err(e) => {
             eprintln!("❌ Replication connect to {addr}: {e}");
-            return;
+            return false;
         }
     };
 
@@ -142,13 +143,13 @@ pub async fn pull_from_peer(
     };
     let challenge_bytes = serde_json::to_vec(&challenge).unwrap_or_default();
     if stream.write_all(&challenge_bytes).await.is_err() {
-        return;
+        return false;
     }
 
     let mut buf = vec![0u8; 65536];
     let n = stream.read(&mut buf).await.unwrap_or(0);
     if n == 0 {
-        return;
+        return false;
     }
     let Ok(ReplicationMsg::ChallengeResponse {
         signature,
@@ -156,33 +157,33 @@ pub async fn pull_from_peer(
         ..
     }) = serde_json::from_slice::<ReplicationMsg>(&buf[..n])
     else {
-        return;
+        return false;
     };
 
     let vk_bytes = match hex::decode(&verifying_key) {
         Ok(b) => b,
-        Err(_) => return,
+        Err(_) => return false,
     };
     let vk_arr: [u8; 32] = match vk_bytes.try_into() {
         Ok(a) => a,
-        Err(_) => return,
+        Err(_) => return false,
     };
     let vk = match VerifyingKey::from_bytes(&vk_arr) {
         Ok(k) => k,
-        Err(_) => return,
+        Err(_) => return false,
     };
     let sig_bytes = match hex::decode(&signature) {
         Ok(b) => b,
-        Err(_) => return,
+        Err(_) => return false,
     };
     let sig_arr: [u8; 64] = match sig_bytes.try_into() {
         Ok(a) => a,
-        Err(_) => return,
+        Err(_) => return false,
     };
     let sig = Signature::from_bytes(&sig_arr);
     if vk.verify(nonce.as_bytes(), &sig).is_err() {
         eprintln!("❌ Signature verification failed for peer {addr}");
-        return;
+        return false;
     }
 
     let req = ReplicationMsg::SyncRequest {
@@ -190,26 +191,29 @@ pub async fn pull_from_peer(
     };
     let req_bytes = serde_json::to_vec(&req).unwrap_or_default();
     if stream.write_all(&req_bytes).await.is_err() {
-        return;
+        return false;
     }
 
     let n = stream.read(&mut buf).await.unwrap_or(0);
     if n == 0 {
-        return;
+        return false;
     }
     let Ok(ReplicationMsg::SyncData { todos }) =
         serde_json::from_slice::<ReplicationMsg>(&buf[..n])
     else {
-        return;
+        return false;
     };
 
     let merged = merge_todos(local_pool, todos).await;
     if merged > 0 {
         println!("✅ Merged {merged} changes via authenticated replication from {addr}");
     }
+    true
 }
 
 pub async fn run_mesh_worker(state: AppState) {
+    use crate::state::MAX_PEER_FAILURES;
+
     let http_client = reqwest::Client::builder()
         .timeout(Duration::from_secs(2))
         .build()
@@ -220,6 +224,7 @@ pub async fn run_mesh_worker(state: AppState) {
 
         let user_hashes: Vec<String> = { state.user_pools.read().await.keys().cloned().collect() };
 
+        // Collect fingerprints of peers that are still within the beacon window
         let discovered_peers: Vec<crate::state::DiscoveredPeer> = {
             let p = state.peers.read().await;
             p.values()
@@ -227,6 +232,9 @@ pub async fn run_mesh_worker(state: AppState) {
                 .cloned()
                 .collect()
         };
+
+        // Track which peers failed this round: fingerprint -> failed
+        let mut failed_fingerprints: Vec<String> = Vec::new();
 
         for user_hash in &user_hashes {
             let pools_r = state.user_pools.read().await;
@@ -236,7 +244,7 @@ pub async fn run_mesh_worker(state: AppState) {
             drop(pools_r);
 
             for peer in &discovered_peers {
-                pull_from_peer(
+                let ok = pull_from_peer(
                     &peer.addr,
                     peer.replication_port,
                     user_hash,
@@ -244,6 +252,10 @@ pub async fn run_mesh_worker(state: AppState) {
                     &local_pool,
                 )
                 .await;
+
+                if !ok {
+                    failed_fingerprints.push(peer.pubkey_fingerprint.clone());
+                }
             }
 
             let manual: Vec<String> = sqlx::query("SELECT url FROM manual_peers")
@@ -271,6 +283,33 @@ pub async fn run_mesh_worker(state: AppState) {
                             println!("✅ Merged {merged} via HTTP gossip from {url}");
                         }
                     }
+                }
+            }
+        }
+
+        // Increment failure counters; evict peers that exceed the threshold.
+        // The beacon listener will re-insert them if they come back online.
+        if !failed_fingerprints.is_empty() {
+            let mut peers = state.peers.write().await;
+            let mut to_evict: Vec<String> = Vec::new();
+
+            for fp in &failed_fingerprints {
+                if let Some(peer) = peers.get_mut(fp) {
+                    peer.consecutive_failures += 1;
+                    if peer.consecutive_failures >= MAX_PEER_FAILURES {
+                        to_evict.push(fp.clone());
+                    }
+                }
+            }
+
+            for fp in to_evict {
+                if let Some(peer) = peers.remove(&fp) {
+                    println!(
+                        "🔌 Peer {} ({}) evicted after {} failures — will rediscover via beacon",
+                        &fp[..12],
+                        peer.addr,
+                        MAX_PEER_FAILURES
+                    );
                 }
             }
         }

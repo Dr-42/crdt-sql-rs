@@ -5,6 +5,8 @@ use serde::Serialize;
 use sqlx::SqlitePool;
 use tokio::sync::RwLock;
 
+pub const MAX_PEER_FAILURES: u32 = 5;
+
 #[derive(Debug, Clone, Serialize)]
 pub struct DiscoveredPeer {
     pub addr: String,
@@ -12,6 +14,8 @@ pub struct DiscoveredPeer {
     pub pubkey_fingerprint: String,
     pub replication_port: u16,
     pub last_seen: i64,
+    #[serde(skip)]
+    pub consecutive_failures: u32,
 }
 
 #[derive(Clone)]

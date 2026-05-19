@@ -69,6 +69,7 @@ pub async fn run_udp_beacon_listener(peers: Arc<RwLock<HashMap<String, Discovere
             pubkey_fingerprint: packet.pubkey_fingerprint.clone(),
             replication_port: packet.replication_port,
             last_seen: now(),
+            consecutive_failures: 0, // reset on rediscovery
         };
         peers.write().await.insert(packet.pubkey_fingerprint, peer);
     }

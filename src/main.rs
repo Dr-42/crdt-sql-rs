@@ -572,6 +572,44 @@ async fn handle_login(State(state): State<AppState>) -> Response {
     response
 }
 
+async fn handle_logout() -> Response {
+    let mut resp = Redirect::temporary("/").into_response();
+    resp.headers_mut().insert(
+        header::SET_COOKIE,
+        "session=; HttpOnly; Path=/; Max-Age=0".parse().unwrap(),
+    );
+    resp
+}
+
+async fn delete_my_data(
+    State(state): State<AppState>,
+    jar: CookieJar,
+) -> Result<Response, (StatusCode, String)> {
+    let user_hash = verify_session(&jar, &state.signing_key)
+        .ok_or((StatusCode::UNAUTHORIZED, "not logged in".to_string()))?;
+
+    // Mark every todo as deleted (CRDT tombstone — propagates to peers)
+    {
+        let pools = state.user_pools.read().await;
+        if let Some(pool) = pools.get(&user_hash) {
+            sqlx::query("UPDATE todos SET deleted = 1, updated_at = ?, node_id = ?")
+                .bind(now())
+                .bind(&state.node_id)
+                .execute(pool)
+                .await
+                .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+        }
+    }
+
+    // Clear session
+    let mut resp = (StatusCode::OK, "data deleted").into_response();
+    resp.headers_mut().insert(
+        header::SET_COOKIE,
+        "session=; HttpOnly; Path=/; Max-Age=0".parse().unwrap(),
+    );
+    Ok(resp)
+}
+
 async fn handle_oauth_callback(
     State(state): State<AppState>,
     Query(params): Query<OAuthCallback>,
@@ -1046,8 +1084,10 @@ async fn main() {
 
     let app = Router::new()
         .route("/auth/login", get(handle_login))
+        .route("/auth/logout", get(handle_logout))
         .route("/auth/callback", get(handle_oauth_callback))
         .route("/auth/me", get(handle_me))
+        .route("/auth/delete-data", post(delete_my_data)) // NEW
         .route("/api/todos", get(list_active_todos).post(create_todo))
         .route("/api/todos/{id}", patch(update_todo).delete(delete_todo))
         .route("/api/peers", get(get_peers_handler).post(add_peer_manual))
